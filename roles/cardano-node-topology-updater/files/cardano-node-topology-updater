@@ -1,0 +1,5 @@
+#!/bin/bash
+#
+# Update topology file cardano-node instance
+
+/opt/guild-operators/cnode-helper-scripts/topologyUpdater.sh "$@"

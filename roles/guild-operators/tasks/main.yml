@@ -1,0 +1,30 @@
+---
+- name: Create Guild Operators installation directories
+  become: yes
+  ansible.builtin.file:
+    path: "/opt/guild-operators/cnode-helper-scripts"
+    state: directory
+- name: Check if env file exists
+  become: yes
+  ansible.builtin.stat:
+    path: /opt/guild-operators/cnode-helper-scripts/env
+  register: env_file
+- name: Download default env file
+  become: yes
+  get_url:
+    url: https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/env
+    dest: /opt/guild-operators/cnode-helper-scripts
+  when: not env_file.stat.exists
+- name: Update env file
+  become: yes
+  ansible.builtin.lineinfile:
+    path: /opt/guild-operators/cnode-helper-scripts/env
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+  - { regexp: '#+CCLI=', line: 'CCLI="/usr/local/bin/cardano-cli"' }
+  - { regexp: '#+CNODE_PORT=', line: 'CNODE_PORT={{ node_port }}' }
+  - { regexp: '#+CONFIG=', line: 'CONFIG="/usr/local/etc/sequlo/cardano-node/network/{{ node_network }}/{{ node_network }}-config.json"' }
+  - { regexp: '#+TOPOLOGY=', line: 'TOPOLOGY="/usr/local/etc/sequlo/cardano-node/network/{{ node_network }}/{{ node_network }}-topology.json"' }
+  - { regexp: '#+LOG_DIR=', line: 'LOG_DIR="/tmp"' }
+  - { regexp: '#+UPDATE_CHECK=', line: 'UPDATE_CHECK="N"' }

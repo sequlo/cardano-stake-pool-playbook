@@ -1,0 +1,13 @@
+---
+- name: Install cardano-tx
+  become: yes
+  ansible.builtin.unarchive:
+    src: 'https://github.com/input-output-hk/cardano-transactions/releases/download/{{ version }}/cardano-transactions-{{ version }}-linux64.tar.gz'
+    dest: /usr/local/bin
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+    extra_opts:
+    - 'bin/cardano-tx'
+    - '--strip-components=1'

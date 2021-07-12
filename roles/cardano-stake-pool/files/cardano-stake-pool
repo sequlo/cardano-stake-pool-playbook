@@ -1,0 +1,517 @@
+#!/bin/bash
+#
+# Command-line for Cardano stake pool
+
+set -o pipefail
+set -o errexit
+
+source "/usr/local/etc/sequlo/cardano-node/node.conf"
+
+POOL_CONF_PATH="pool.conf"
+POOL_SPO_DIR="spo"
+POOL_OWNER_DIR_PREFIX="owner-"
+POOL_USER_KEYS_DIR="keys"
+POOL_USER_KEY_PAYMENT_SKEY_PATH="$POOL_USER_KEYS_DIR/payment.skey"
+POOL_USER_KEY_PAYMENT_VKEY_PATH="$POOL_USER_KEYS_DIR/payment.vkey"
+POOL_USER_KEY_PAYMENT_ADDR_PATH="$POOL_USER_KEYS_DIR/payment.addr"
+POOL_USER_KEY_STAKE_SKEY_PATH="$POOL_USER_KEYS_DIR/stake.skey"
+POOL_USER_KEY_STAKE_VKEY_PATH="$POOL_USER_KEYS_DIR/stake.vkey"
+POOL_USER_KEY_STAKE_ADDR_PATH="$POOL_USER_KEYS_DIR/stake.addr"
+POOL_DIR="pool"
+POOL_KEYS_DIR="$POOL_DIR/keys"
+POOL_KEY_COLD_SKEY_PATH="$POOL_KEYS_DIR/cold.skey"
+POOL_KEY_COLD_VKEY_PATH="$POOL_KEYS_DIR/cold.vkey"
+POOL_KEY_COLD_COUNTER_PATH="$POOL_KEYS_DIR/cold.counter"
+POOL_KEY_KES_SKEY_PATH="$POOL_KEYS_DIR/kes.skey"
+POOL_KEY_KES_VKEY_PATH="$POOL_KEYS_DIR/kes.vkey"
+POOL_KEY_VRF_SKEY_PATH="$POOL_KEYS_DIR/vrf.skey"
+POOL_KEY_VRF_VKEY_PATH="$POOL_KEYS_DIR/vrf.vkey"
+POOL_CERT_NODE_OPERATIONAL_PATH="$POOL_DIR/node-operational.cert"
+
+# ------------------------------------------------------------------------------------------------
+# Business layer
+# ------------------------------------------------------------------------------------------------
+
+function pool_init_cold_keys() {
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$POOL_KEY_COLD_SKEY_PATH" ]]; then
+    mkdir -p "$POOL_KEYS_DIR"
+    cardano-cli node key-gen \
+      --cold-verification-key-file "$POOL_KEY_COLD_VKEY_PATH" \
+      --cold-signing-key-file "$POOL_KEY_COLD_SKEY_PATH" \
+      --operational-certificate-issue-counter-file "$POOL_KEY_COLD_COUNTER_PATH"
+  fi
+}
+
+function pool_init_kes_keys() {
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$POOL_KEY_KES_SKEY_PATH" ]]; then
+    mkdir -p "$POOL_KEYS_DIR"
+    cardano-cli node key-gen-KES \
+      --verification-key-file "$POOL_KEY_KES_VKEY_PATH" \
+      --signing-key-file "$POOL_KEY_KES_SKEY_PATH"
+  fi
+}
+
+function pool_init_vrf_keys() {
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$POOL_KEY_VRF_SKEY_PATH" ]]; then
+    mkdir -p "$POOL_KEYS_DIR"
+    cardano-cli node key-gen-VRF \
+      --verification-key-file "$POOL_KEY_VRF_VKEY_PATH" \
+      --signing-key-file "$POOL_KEY_VRF_SKEY_PATH"
+  fi
+}
+
+function pool_init_op_cert() {
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$POOL_CERT_NODE_OPERATIONAL_PATH" ]]; then
+    mkdir -p "$POOL_DIR"
+    local slots_per_kes_period="$(cat "$NODE_SHELLEY_GENESIS_PATH" | grep KESPeriod | tr -d ', ' | cut -f 2 -d ':')"
+    local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+    local current_kes_period="$(( current_slot / slots_per_kes_period ))"
+    cardano-cli node issue-op-cert \
+      --kes-verification-key-file "$POOL_KEY_KES_VKEY_PATH" \
+      --cold-signing-key-file "$POOL_KEY_COLD_SKEY_PATH" \
+      --operational-certificate-issue-counter "$POOL_KEY_COLD_COUNTER_PATH" \
+      --kes-period "$current_kes_period" \
+      --out-file "$POOL_CERT_NODE_OPERATIONAL_PATH"
+  fi
+}
+
+function pool_init_config_file() {
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$POOL_CONF_PATH" ]]; then
+  cat <<EOF > "$POOL_CONF_PATH"
+# The stake pool's target network
+POOL_NETWORK="$NODE_NETWORK" # STRING
+
+# POOL_METADATA_URL="" # URL, .{0,64}, if supplied the other metadata variables should also be supplied
+# POOL_NAME="" # STRING
+# POOL_DESCRIPTION="" # STRING, .{0,255}
+# POOL_TICKER="" # STRING, [A-Z0-9]{3,5}
+# POOL_HOMEPAGE="" # URL
+
+POOL_PLEDGE="" # LOVELACE
+POOL_COST="" # LOVELACE, see protocol parameters for minimum
+POOL_MARGIN="" # DOUBLE, 0.0-1.0 (=0-100%)
+
+# The stake pool relay's DNS name that corresponds to an A or AAAA DNS record mapped to a port
+declare -A POOL_SINGLE_HOST_RELAYS
+# POOL_SINGLE_HOST_RELAYS['relay1.mypool.com']=6000
+
+# The stake pool relay's DNS name that corresponds to an SRV DNS record mapped to a port
+declare -A POOL_MULTI_HOST_RELAYS
+# POOL_MULTI_HOST_RELAYS['relays.mypool.com']=6000
+
+# The stake pool relay's IPv4 address mapped to a port
+declare -A POOL_IPV4_RELAYS
+# POOL_IPV4_RELAYS['1.2.3.4']=6000
+
+# The stake pool relay's IPv6 address mapped to a port
+declare -A POOL_IPV6_RELAYS
+# POOL_IPV6_RELAYS['1111:2222:3333:4444:5555:6666:7777:8888']=6000
+EOF
+    chmod 600 "$POOL_CONF_PATH"
+  fi
+}
+
+function pool_user_init_payment_keys() {
+  local user="$1"; shift
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$user/$POOL_USER_KEY_PAYMENT_SKEY_PATH" ]]; then
+    mkdir -p "$user/$POOL_USER_KEYS_DIR"
+    cardano-cli address key-gen \
+      --verification-key-file "$user/$POOL_USER_KEY_PAYMENT_VKEY_PATH" \
+      --signing-key-file "$user/$POOL_USER_KEY_PAYMENT_SKEY_PATH"
+  fi
+}
+
+function pool_user_init_stake_keys() {
+  local user="$1"; shift
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$user/$POOL_USER_KEY_STAKE_SKEY_PATH" ]]; then
+    mkdir -p "$user/$POOL_USER_KEYS_DIR"
+    cardano-cli stake-address key-gen \
+      --verification-key-file "$user/$POOL_USER_KEY_STAKE_VKEY_PATH" \
+      --signing-key-file "$user/$POOL_USER_KEY_STAKE_SKEY_PATH"
+  fi
+}
+
+function pool_user_init() {
+  local user="$1"; shift
+  local is_forced="$1"; shift
+  pool_user_init_payment_keys "$user" "$is_forced"
+  pool_user_init_stake_keys "$user" "$is_forced"
+}
+
+function pool_init() {
+  local is_spo_owner="$1"; shift
+  local owner_count="$1"; shift
+  pool_init_cold_keys false
+  pool_init_kes_keys false
+  pool_init_vrf_keys false
+  pool_init_op_cert false
+  pool_init_config_file false
+  pool_user_init "$POOL_SPO_DIR" false
+  local owner_ix=1
+  if [ "$is_spo_owner" == true ]; then
+    [ ! -h "$POOL_OWNER_DIR_PREFIX$owner_ix" ] && ln -s "$POOL_SPO_DIR" "$POOL_OWNER_DIR_PREFIX$owner_ix"
+    owner_ix=2
+  fi
+  while [ "$owner_ix" -le  "$owner_count" ]; do
+    pool_user_init "$POOL_OWNER_DIR_PREFIX$owner_ix" false
+    owner_ix=$((owner_ix + 1))
+  done
+}
+
+function pool_get_id() {
+  local output_format="$1"; shift
+  cardano-cli stake-pool id --cold-verification-key-file "$POOL_KEY_COLD_VKEY_PATH" --output-format "$output_format"
+}
+
+function pool_get_metadata() {
+  source "$POOL_CONF_PATH"
+  cat <<EOF
+{
+  "name": "$POOL_NAME",
+  "description": "$POOL_DESCRIPTION",
+  "ticker": "$POOL_TICKER",
+  "homepage": "$POOL_HOMEPAGE"
+}
+EOF
+}
+
+function pool_query_ledger_state() {
+  local pool_id="$(pool_get_id hex)"
+  cardano-cli query ledger-state $NODE_CLI_MAGIC_ARGS | grep publicKey | grep "$pool_id"
+}
+
+function pool_query_stake_snapshot() {
+  local pool_id="$(pool_get_id hex)"
+  cardano-cli query stake-snapshot --stake-pool-id "$pool_id" $NODE_CLI_MAGIC_ARGS
+}
+
+function pool_query_pool_params() {
+  local pool_id="$(pool_get_id hex)"
+  cardano-cli query pool-params --stake-pool-id "$pool_id" $NODE_CLI_MAGIC_ARGS
+}
+
+function pool_generate_stake_pool_registration_certificate() {
+  local out_file="$1"; shift
+  local gen_cert_cmd="cardano-cli stake-pool registration-certificate --cold-verification-key-file $POOL_KEY_COLD_VKEY_PATH --vrf-verification-key-file $POOL_KEY_VRF_VKEY_PATH --pool-pledge $POOL_PLEDGE --pool-cost $POOL_COST --pool-margin $POOL_MARGIN --pool-reward-account-verification-key-file $POOL_SPO_DIR/$POOL_USER_KEY_STAKE_VKEY_PATH"
+  for owner in $(ls -1 . | grep $POOL_OWNER_DIR_PREFIX); do
+    gen_cert_cmd+=" --pool-owner-stake-verification-key-file $owner/$POOL_USER_KEY_STAKE_VKEY_PATH"
+  done
+  for relay in "${!POOL_SINGLE_HOST_RELAYS[@]}"; do
+    gen_cert_cmd+=" --single-host-pool-relay $relay"
+    gen_cert_cmd+=" --pool-relay-port ${POOL_SINGLE_HOST_RELAYS[$relay]}"
+  done
+  for relay in "${!POOL_MULTI_HOST_RELAYS[@]}"; do
+    gen_cert_cmd+=" --multi-host-pool-relay $relay"
+    gen_cert_cmd+=" --pool-relay-port ${POOL_MULTI_HOST_RELAYS[$relay]}"
+  done
+  for relay in "${!POOL_IPV4_RELAYS[@]}"; do
+    gen_cert_cmd+=" --pool-relay-ipv4 $relay"
+    gen_cert_cmd+=" --pool-relay-port ${POOL_IPV4_RELAYS[$relay]}"
+  done
+  for relay in "${!POOL_IPV6_RELAYS[@]}"; do
+    gen_cert_cmd+=" --pool-relay-ipv6 $relay"
+    gen_cert_cmd+=" --pool-relay-port ${POOL_IPV6_RELAYS[$relay]}"
+  done
+  if [ ! -z "$POOL_METADATA_URL" ]; then
+    gen_cert_cmd+=" --metadata-url $POOL_METADATA_URL"
+    gen_cert_cmd+=" --metadata-hash $(cardano-cli stake-pool metadata-hash --pool-metadata-file $POOL_METADATA_PATH)"
+  fi
+  gen_cert_cmd+=" $NODE_CLI_MAGIC_ARGS --out-file $out_file"
+  eval "$gen_cert_cmd"
+}
+
+function pool_register() {
+  local is_dry_run="$1"; shift
+  local workdir="$(mktemp -d)"
+  source "$POOL_CONF_PATH"
+  pool_generate_stake_pool_registration_certificate "$workdir/stake-pool-reg.cert"
+  local tx_out_addr="$(cat "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_ADDR_PATH")"
+  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
+  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
+  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  local owners=$(ls -1 . | grep "$POOL_OWNER_DIR_PREFIX")
+  for owner in "${owners[@]}"; do cardano-cli stake-address delegation-certificate --stake-verification-key-file "$owner/$POOL_USER_KEY_STAKE_VKEY_PATH" --cold-verification-key-file "$POOL_KEY_COLD_VKEY_PATH" --out-file "$workdir/$owner-stake-addr-deleg.cert"; done
+  local draft_tx_cmd="cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.draft""
+  for owner in "${owners[@]}"; do draft_tx_cmd+=" --certificate-file $workdir/$owner-stake-addr-deleg.cert"; done
+  eval "$draft_tx_cmd"
+  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local witnesses=("$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_SKEY_PATH" "$POOL_KEY_COLD_SKEY_PATH")
+  for owner in "${owners[@]}"; do witnesses+=("$owner/$POOL_USER_KEY_STAKE_SKEY_PATH"); done
+  cmp -s "$POOL_SPO_DIR/$POOL_USER_KEY_STAKE_SKEY_PATH" "${POOL_OWNER_DIR_PREFIX}1/$POOL_USER_KEY_STAKE_SKEY_PATH" || witnesses+=("$POOL_SPO_DIR/$POOL_USER_KEY_STAKE_SKEY_PATH")
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count "${#witnesses[@]}" --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local stake_pool_deposit="$(cat "$workdir/protocol.json" | grep stakePoolDeposit | tr -d ', ' | cut -f 2 -d:)"
+  local change="$(( spend - fee - stake_pool_deposit ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  local raw_tx_cmd="cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee"  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.raw""
+  for owner in "${owners[@]}"; do raw_tx_cmd+=" --certificate-file $workdir/$owner-stake-addr-deleg.cert"; done
+  eval "$raw_tx_cmd"
+  local sign_tx_cmd="cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed""
+  for witness in "${witnesses[@]}"; do sign_tx_cmd+=" --signing-key-file "$witness""; done
+  eval "$sign_tx_cmd"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
+function pool_retire() {
+  local epoch="$1"; shift
+  local is_dry_run="$1"; shift
+  local workdir="$(mktemp -d)"
+  cardano-cli stake-pool deregistration-certificate --cold-verification-key-file "$POOL_KEY_COLD_VKEY_PATH" --epoch "$epoch" --out-file "$workdir/stake-pool-dereg.cert"
+  local tx_out_addr="$(cat "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_ADDR_PATH")"
+  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
+  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
+  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-pool-dereg.cert" --out-file "$workdir/tx.draft"
+  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local change="$(( spend - fee ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-pool-dereg.cert" --out-file "$workdir/tx.raw"
+  cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_SKEY_PATH" --signing-key-file "$POOL_KEY_COLD_SKEY_PATH" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
+function pool_renew() {
+  pool_init_kes_keys true
+  pool_init_op_cert true
+}
+
+function pool_export() {
+  local target="$1"; shift
+  scp "$POOL_CERT_NODE_OPERATIONAL_PATH" "$POOL_KEY_KES_SKEY_PATH" "$POOL_KEY_VRF_SKEY_PATH" "$target"
+}
+
+# ------------------------------------------------------------------------------------------------
+# Service layer
+# ------------------------------------------------------------------------------------------------
+
+function print_usage_main_export() {
+    cat <<EOF
+Usage: cardano-stake-pool export [USER@]HOST:DIR
+  Export operational certificate and keys needed to core node
+EOF
+    exit 1
+}
+
+function main_export() {
+  local target="$1"; shift || print_usage_main_export
+  pool_export "$target"
+}
+
+function print_usage_main_retire() {
+    cat <<EOF
+Usage: cardano-stake-pool retire [--dry-run] EPOCH
+  Retire stake pool
+
+Available options:
+  --dry-run                 Generate stake pool deregistration certificate and signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_retire() {
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_retire;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  local epoch="$1"; shift || true
+  pool_retire "$epoch" "$is_dry_run"
+}
+
+function print_usage_main_register() {
+    cat <<EOF
+Usage: cardano-stake-pool register [--dry-run]
+  Register stake pool
+
+Available options:
+  --dry-run                 Generate stake pool registration and stake delegation certificates and signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_register() {
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_register;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  pool_register "$is_dry_run"
+}
+
+function print_usage_main_query() {
+    cat <<EOF
+Usage: cardano-stake-pool query COMMAND
+  Query local node for stake pool object
+
+Available commands:
+  ledger-state              Check for the presence of the pool ID in the network ledger state
+  stake-snapshot            Get the stake snapshot information for the stake pool
+  pool-params               Get the current and future parameters for the stake pool, including retirement
+EOF
+    exit 1
+}
+
+function main_query() {
+  local command="$1"; shift || true
+  case "$command" in
+    ledger-state) pool_query_ledger_state "$@";;
+    stake-snapshot) pool_query_stake_snapshot "$@";;
+    pool-params) pool_query_pool_params "$@";;
+    *) print_usage_main_query;;
+  esac
+}
+
+function print_usage_main_get_pool_id() {
+    cat <<EOF
+Usage: cardano-stake-pool get pool-id [--bech32|--hex]
+  Get stake pool ID
+
+Available options:
+  --bech32                  Bech32-encoded pool ID (default)
+  --hex                     Hex-encoded pool ID
+EOF
+    exit 1
+}
+
+function main_get_pool_id() {
+  local output_format="bech32"
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      bech32) ;;
+      hex) output_format="hex";;
+      *) print_usage_main_get_pool_id;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  pool_get_id "$output_format" "$@"
+}
+
+function print_usage_main_get() {
+    cat <<EOF
+Usage: cardano-stake-pool get COMMAND
+  Get stake pool object
+
+Available commands:
+  pool-id                   Get stake pool ID
+  meta-data                 Get stake pool meta-data JSON
+EOF
+    exit 1
+}
+
+function main_get() {
+  local command="$1"; shift || true
+  case "$command" in
+    pool-id) main_get_pool_id "$@";;
+    meta-data) pool_get_metadata "$@";;
+    *) print_usage_main_get;;
+  esac
+}
+
+function print_usage_main_init() {
+    cat <<EOF
+Usage: cardano-stake-pool init [(-n|--owners) AMOUNT] [--spo-is-not-owner]
+  Scaffold stake pool configuration and resources
+
+Available options:
+  -n, --owners AMOUNT Number of pool owners (>=1), defaults to 1
+  --spo-is-not-owner  By default SPO is also pool owner, pass this option if this is not desired
+EOF
+    exit 1
+}
+
+function main_init() {
+  local is_spo_owner=true
+  local owner_count=1
+  OPTIND=0
+  while getopts ":n:-:" opt; do
+    if [ "$opt" == '-' ]; then
+        opt="$OPTARG"; unset OPTARG
+        case "$opt" in owners) OPTARG="${!OPTIND}"; OPTIND+=1;; esac
+    fi
+    case "$opt" in
+      spo-is-not-owner) local is_spo_owner=false;;
+      owners|n) local owner_count="$OPTARG";;
+      *) print_usage_main_init;;
+    esac
+  done
+  shift $((OPTIND - 1));
+  pool_init "$is_spo_owner" "$owner_count"
+}
+
+function print_usage_main() {
+    cat <<EOF
+Usage: cardano-stake-pool [-X|--debug] COMMAND
+  Command-line for Cardano stake pool
+
+Available options:
+  -X, --debug               Produce execution debug output
+
+Available commands:
+  init                      Scaffold stake pool configuration and resources
+  get                       Get stake pool object
+  query                     Query local node for stake pool object
+  register                  Register stake pool
+  retire                    Retire stake pool
+  renew                     Renew KES-keys and operational certificate
+  export                    Export operational certificate and keys needed to core node
+EOF
+    exit 1
+}
+
+function main() {
+  local is_debug=false
+  while getopts ":X-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      debug|X) is_debug=true;;
+      *) print_usage_main;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [ "$is_debug" == true ] && set -o xtrace
+  local command="$1"; shift || true
+  case "$command" in
+    init) main_init "$@";;
+    get) main_get "$@";;
+    query) main_query "$@";;
+    register) main_register "$@";;
+    retire) main_retire "$@";;
+    renew) pool_renew "$@";;
+    export) main_export "$@";;
+    *) print_usage_main;;
+  esac
+  exit 0
+}
+
+main "$@"

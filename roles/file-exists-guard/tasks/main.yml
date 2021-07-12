@@ -1,0 +1,8 @@
+- name: Check if file stat
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: file
+- name: Fail if file does not exist
+  ansible.builtin.fail:
+    msg: "Abort, file should exist: {{ item }}"
+  when: not file.stat.exists

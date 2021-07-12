@@ -1,0 +1,13 @@
+---
+- name: Download gLiveView script
+  become: yes
+  get_url:
+    url: https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/gLiveView.sh
+    dest: /opt/guild-operators/cnode-helper-scripts
+    mode: '0755'
+- name: Install cardano-node-monitor
+  become: yes
+  ansible.builtin.copy:
+    src: files/cardano-node-monitor
+    dest: /usr/local/bin
+    mode: '0755'

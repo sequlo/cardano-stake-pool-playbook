@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# Manage Cardano node service
+
+set -o errexit
+
+function print_usage_main() {
+    cat <<EOF
+Usage: cardano-node-service COMMAND
+  Command-line for managing cardano-node-service
+
+Available commands:
+  start           Start node service
+  stop            Stop node service
+  restart         Restart node service
+  enable          Enable start node service on boot
+  disable         Disable start node service on boot
+  status          Print node service status
+  log             Follow node service log
+EOF
+    exit 1
+}
+
+function main() {
+  local command="$1"; shift || true
+  case "$command" in
+    start) systemctl start cardano-node;;
+    stop) systemctl stop cardano-node;;
+    restart) systemctl restart cardano-node;;
+    enable) systemctl enable cardano-node;;
+    disable) systemctl disable cardano-node;;
+    status) systemctl status cardano-node;;
+    log) journalctl -f -u cardano-node;;
+    *) print_usage_main;;
+  esac
+}
+
+main "$@"

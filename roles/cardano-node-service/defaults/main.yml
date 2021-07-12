@@ -1,0 +1,17 @@
+---
+node_network: "testnet"
+node_host:
+node_socket_path: "/tmp/cardano-node.socket"
+node_byron_delegation_certificate:
+node_byron_signing_key:
+node_shelley_kes_key:
+node_shelley_vrf_key:
+node_shelley_operational_certificate:
+node_bulk_credentials_file:
+node_host_addr: "0.0.0.0"
+node_host_ipv6_addr:
+node_port: 6000
+node_snapshot_interval:
+node_validate_db: 'false'
+node_shutdown_ipc:
+node_shutdown_on_slot_synced: 'false'

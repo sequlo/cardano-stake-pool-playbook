@@ -1,0 +1,50 @@
+---
+- include_role:
+    name: file-exists-guard
+  vars:
+    item: /usr/local/bin/cardano-node
+- name: Install start-node script
+  become: yes
+  ansible.builtin.copy:
+    src: files/start-node
+    dest: "/usr/local/lib/sequlo/cardano-node/"
+    mode: '0755'
+- name: Install node.conf
+  become: yes
+  ansible.builtin.template:
+    src: templates/node.conf
+    dest: "/usr/local/etc/sequlo/cardano-node/"
+- name: Download network configuration
+  include_tasks: download-network-config.yml
+  loop:
+  - mainnet
+  - testnet
+  loop_control:
+    loop_var: network
+- name: Create var directory
+  become: yes
+  ansible.builtin.file:
+    path: "/var/local/sequlo/cardano-node"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+- name: Install service definition
+  become: yes
+  ansible.builtin.template:
+    src: templates/cardano-node.service
+    dest: /etc/systemd/system/cardano-node.service
+- name: Reload systemd daemon
+  become: yes
+  command: systemctl daemon-reload
+- name: Install cardano-node-service
+  become: yes
+  ansible.builtin.copy:
+    src: files/cardano-node-service
+    dest: /usr/local/bin
+    mode: '0755'
+- name: Configure CARDANO_NODE_SOCKET_PATH
+  ansible.builtin.lineinfile:
+    path: ~/.bashrc
+    line: "export CARDANO_NODE_SOCKET_PATH={{ node_socket_path }}"
+- name: Load environment variables
+  shell: . ~/.bashrc

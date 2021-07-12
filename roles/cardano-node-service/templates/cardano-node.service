@@ -1,0 +1,17 @@
+[Unit]
+Description=Cardano node service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User={{ ansible_user }}
+ExecStart=bash -c "/usr/local/lib/sequlo/cardano-node/start-node"
+KillSignal=SIGINT
+RestartKillSignal=SIGINT
+TimeoutStopSec=2
+LimitNOFILE=32768
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

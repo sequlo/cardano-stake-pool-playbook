@@ -1,0 +1,21 @@
+---
+- name: Check if backup topology file exists
+  ansible.builtin.stat:
+    path: "{{ topology_path }}.org"
+  register: topology_backup_file
+- name: Proceed with topology file update
+  block:  
+  - name: Backup current topology file
+    become: yes
+    ansible.builtin.copy:
+      src: "{{ topology_path }}"
+      dest: "{{ topology_path }}.org"
+      remote_src: yes
+  - name: Add producer
+    become: yes
+    shell: 'json="$(jq ''.Producers += [{"addr": "{{ hostvars[producer].node_host }}", "port": {{ hostvars[producer].node_port }}, "valency": 1}]'' {{ topology_path }})" && echo "$json" > {{ topology_path }}'
+    when: ansible_host != hostvars[producer].ansible_host
+    loop: "{{ groups['relays'] + [ 'core' ] }}"
+    loop_control:
+      loop_var: producer
+  when: not topology_backup_file.stat.exists

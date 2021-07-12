@@ -1,0 +1,35 @@
+---
+- name: Setup network config dir
+  become: yes
+  ansible.builtin.file:
+    path: "/usr/local/etc/sequlo/cardano-node/network"
+    state: directory
+- name: Check if network config exists
+  ansible.builtin.stat:
+    path: "/usr/local/etc/sequlo/cardano-node/network/{{ network }}"
+  register: network_config_dir
+- name: Proceed with config download
+  block:
+  - name: Initialize network config subdir
+    become: yes
+    ansible.builtin.file:
+      path: "/usr/local/etc/sequlo/cardano-node/network/{{ network }}"
+      state: directory
+  - name: Copy network config files
+    become: yes
+    get_url:
+      url: "https://hydra.iohk.io/job/Cardano/cardano-node/cardano-deployment/latest-finished/download/1/{{ network }}-{{ config_file }}"
+      dest: "/usr/local/etc/sequlo/cardano-node/network/{{ network }}"
+    loop:
+    - config.json
+    - byron-genesis.json
+    - shelley-genesis.json
+    - alonzo-genesis.json
+    - topology.json
+    loop_control:
+      loop_var: config_file
+  - name: 'Workaround for bug: https://github.com/input-output-hk/cardano-node/issues/2878'
+    become: yes
+    shell: 'json="$(jq ''. + {TestEnableDevelopmentNetworkProtocols: true}'' /usr/local/etc/sequlo/cardano-node/network/testnet/testnet-config.json)" && echo "$json" > /usr/local/etc/sequlo/cardano-node/network/testnet/testnet-config.json'
+    when: network == 'testnet'
+  when: not network_config_dir.stat.exists

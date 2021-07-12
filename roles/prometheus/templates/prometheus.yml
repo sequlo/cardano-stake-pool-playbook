@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+scrape_configs:
+- job_name: 'cardano-stake-pool'
+  static_configs:
+  - targets: ['{{ hostvars['core'].ansible_host }}:9100', '{{ hostvars['core'].ansible_host }}:12798']
+    labels:
+      node: 'core'
+{% for relay in groups['relays'] %}
+  - targets: ['{{ hostvars[relay].ansible_host }}:9100', '{{ hostvars[relay].ansible_host }}:12798']
+    labels:
+      node: '{{ relay }}'
+{% endfor %}

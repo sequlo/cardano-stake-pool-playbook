@@ -1,0 +1,59 @@
+---
+- name: Install APT packages required by Grafana
+  become: yes
+  apt:
+    name:
+    - apt-transport-https
+    - software-properties-common
+- name: Add official Grafana GPG key
+  become: yes
+  apt_key:
+    url: https://packages.grafana.com/gpg.key
+    state: present
+- name: Add Grafana APT repository
+  become: yes
+  apt_repository:
+    repo: deb https://packages.grafana.com/oss/deb stable main
+    state: present
+- name: Update and install Grafana APT package
+  become: yes
+  apt:
+    update_cache: yes
+    name: grafana
+- name: Create dashboards directory
+  become: yes
+  ansible.builtin.file:
+    path: "/var/lib/grafana/dashboards"
+    state: directory
+    owner: "grafana"
+    group: "grafana"
+- name: Copy dashboard definition
+  become: yes
+  ansible.builtin.copy:
+    src: files/dashboard.json
+    dest: /var/lib/grafana/dashboards
+    mode: '0644'
+    owner: "grafana"
+    group: "grafana"
+- name: Provision datasources
+  become: yes
+  ansible.builtin.copy:
+    src: files/datasources.yaml
+    dest: /etc/grafana/provisioning/datasources
+    mode: '0640'
+    owner: "root"
+    group: "grafana"
+- name: Provision dashboards
+  become: yes
+  ansible.builtin.copy:
+    src: files/dashboards.yaml
+    dest: /etc/grafana/provisioning/dashboards
+    mode: '0640'
+    owner: "root"
+    group: "grafana"
+- name: Start en enable Grafana
+  become: yes
+  ansible.builtin.systemd:
+    name: grafana-server.service
+    state: restarted
+    enabled: yes

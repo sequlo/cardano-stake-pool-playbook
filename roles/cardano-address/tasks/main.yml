@@ -1,0 +1,13 @@
+---
+- name: Install cardano-address
+  become: yes
+  ansible.builtin.unarchive:
+    src: 'https://github.com/input-output-hk/cardano-addresses/releases/download/{{ version }}/cardano-addresses-{{ version }}-linux64.tar.gz'
+    dest: /usr/local/bin
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+    extra_opts:
+    - 'bin/cardano-address'
+    - '--strip-components=1'

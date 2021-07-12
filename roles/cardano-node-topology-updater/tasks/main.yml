@@ -1,0 +1,28 @@
+---
+- name: Download topologyUpdater script
+  become: yes
+  get_url:
+    url: https://raw.githubusercontent.com/cardano-community/guild-operators/alpha/scripts/cnode-helper-scripts/topologyUpdater.sh
+    dest: /opt/guild-operators/cnode-helper-scripts
+    mode: '0755'
+- name: Update custom peers
+  become: yes
+  ansible.builtin.lineinfile:
+    path: /opt/guild-operators/cnode-helper-scripts/topologyUpdater.sh
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+  - { regexp: 'CNODE_HOSTNAME=', line: 'CNODE_HOSTNAME="{{ node_host }}"' }
+  - { regexp: '#CUSTOM_PEERS=', line: "CUSTOM_PEERS=\"{{ hostvars['core'].node_host }}:{{ hostvars['core'].node_port }}\"" }
+- name: Install cardano-node-topology-updater
+  become: yes
+  ansible.builtin.copy:
+    src: files/cardano-node-topology-updater
+    dest: /usr/local/bin
+    mode: '0755'
+- name: Schedule cron job for updating the topology file
+  become: yes
+  ansible.builtin.cron:
+    name: "update relay topology file"
+    minute: "0"
+    job: "/usr/local/bin/cardano-node-topology-updater"

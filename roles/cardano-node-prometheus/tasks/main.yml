@@ -1,0 +1,17 @@
+---
+- name: Install Prometheus Node Exporter
+  become: yes
+  apt:
+    name: prometheus-node-exporter
+- name: Start en enable Prometheus Node Exporter
+  become: yes
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter.service
+    state: started
+    enabled: yes
+- name: Prometheus endpoint cardano-node listens on all interfaces
+  become: yes
+  ansible.builtin.replace:
+    path: /usr/local/etc/sequlo/cardano-node/network/{{ node_network }}/{{ node_network }}-config.json
+    regexp: '127\.0\.0\.1'
+    replace: "0.0.0.0"

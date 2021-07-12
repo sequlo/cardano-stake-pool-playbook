@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+- name: Dashboards
+  type: file
+  orgId: 1
+  folder: Cardano
+  updateIntervalSeconds: 30
+  options:
+    path: /var/lib/grafana/dashboards

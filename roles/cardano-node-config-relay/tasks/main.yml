@@ -1,0 +1,11 @@
+---
+- name: Optimize relay node config
+  become: yes
+  ansible.builtin.replace:
+    path: /usr/local/etc/sequlo/cardano-node/network/{{ node_network }}/{{ node_network }}-config.json
+    regexp: "{{ item.regexp }}"
+    replace: "{{ item.replace }}"
+  loop:
+  - {regexp: '"TraceBlockFetchClient": false', replace: '"TraceBlockFetchClient": true'}
+  - {regexp: '"TraceBlockFetchDecisions": false', replace: '"TraceBlockFetchDecisions": true'}
+  - {regexp: '"TraceMempool": true', replace: '"TraceMempool": false'}

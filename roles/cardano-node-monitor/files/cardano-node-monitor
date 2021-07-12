@@ -1,0 +1,5 @@
+#!/bin/bash
+#
+# Monitor cardano-node instance
+
+/opt/guild-operators/cnode-helper-scripts/gLiveView.sh "$@"

@@ -1,0 +1,11 @@
+---
+- include_role:
+    name: file-exists-guard
+  vars:
+    item: /usr/local/etc/sequlo/cardano-node/node.conf
+- name: Install cardano-cli-magic-args
+  become: yes
+  ansible.builtin.copy:
+    src: files/cardano-cli-magic-args
+    dest: /usr/local/bin
+    mode: '0755'

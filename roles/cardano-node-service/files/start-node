@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# Start a configured cardano-node instance
+
+set -o errexit
+
+source "/usr/local/etc/sequlo/cardano-node/node.conf"
+
+CMD="/usr/local/bin/cardano-node run"
+[ -z "$NODE_TOPOLOGY" ] || CMD+=" --topology ${NODE_TOPOLOGY}"
+[ -z "$NODE_DATABASE_PATH" ] || CMD+=" --database-path ${NODE_DATABASE_PATH}"
+[ -z "$NODE_SOCKET_PATH" ] || CMD+=" --socket-path ${NODE_SOCKET_PATH}"
+[ -z "$NODE_BYRON_DELEGATION_CERTIFICATE" ] || CMD+=" --byron-delegation-certificate ${NODE_BYRON_DELEGATION_CERTIFICATE}"
+[ -z "$NODE_BYRON_SIGNING_KEY" ] || CMD+=" --byron-signing-key ${NODE_BYRON_SIGNING_KEY}"
+[ -z "$NODE_SHELLEY_KES_KEY" ] || CMD+=" --shelley-kes-key ${NODE_SHELLEY_KES_KEY}"
+[ -z "$NODE_SHELLEY_VRF_KEY" ] || CMD+=" --shelley-vrf-key ${NODE_SHELLEY_VRF_KEY}"
+[ -z "$NODE_SHELLEY_OPERATIONAL_CERTIFICATE" ] || CMD+=" --shelley-operational-certificate ${NODE_SHELLEY_OPERATIONAL_CERTIFICATE}"
+[ -z "$NODE_BULK_CREDENTIALS_FILE" ] || CMD+=" --bulk-credentials-file ${NODE_BULK_CREDENTIALS_FILE}"
+[ -z "$NODE_HOST_ADDR" ] || CMD+=" --host-addr ${NODE_HOST_ADDR}"
+[ -z "$NODE_HOST_IPV6_ADDR" ] || CMD+=" --host-ipv6-addr ${NODE_HOST_IPV6_ADDR}"
+[ -z "$NODE_PORT" ] || CMD+=" --port ${NODE_PORT}"
+[ -z "$NODE_CONFIG" ] || CMD+=" --config ${NODE_CONFIG}"
+[ -z "$NODE_SNAPSHOT_INTERVAL" ] || CMD+=" --snapshot-interval ${NODE_SNAPSHOT_INTERVAL}"
+[ "$NODE_VALIDATE_DB" == false ] || CMD+=" --validate-db"
+[ -z "$NODE_SHUTDOWN_IPC" ] || CMD+=" --shutdown-ipc ${NODE_SHUTDOWN_IPC}"
+[ "$NODE_SHUTDOWN_ON_SLOT_SYNCED" == false ] || CMD+=" --shutdown-on-slot-synced"
+eval "$CMD"

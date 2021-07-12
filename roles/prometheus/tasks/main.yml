@@ -1,0 +1,18 @@
+---
+- name: Install Prometheus
+  become: yes
+  apt:
+    name: prometheus
+- name: Configure Prometheus
+  become: yes
+  ansible.builtin.template:
+    src: templates/prometheus.yml
+    dest: /etc/prometheus/prometheus.yml
+    backup: yes
+    mode: '0644'
+- name: Start en enable Prometheus
+  become: yes
+  ansible.builtin.systemd:
+    name: prometheus.service
+    state: restarted
+    enabled: yes

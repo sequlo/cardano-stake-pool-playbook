@@ -1,0 +1,43 @@
+---
+- name: Construct download url
+  shell: curl -sL https://api.github.com/repos/input-output-hk/cardano-wallet/releases/latest | grep 'download_url' | grep 'linux' | cut -d ':' -f 2,3 | tr -d \" | xargs
+  args:
+    warn: false
+  register: download_url
+- name: Create download directory
+  become: yes
+  ansible.builtin.file:
+    path: "/tmp/cardano-wallet"
+    state: directory
+- name: Unarchive
+  become: yes
+  ansible.builtin.unarchive:
+    src: '{{ download_url.stdout }}'
+    dest: /tmp/cardano-wallet
+    remote_src: yes
+    extra_opts:
+    - '--strip-components=1'
+- name: Install binary
+  become: yes
+  ansible.builtin.copy:
+    src: "/tmp/cardano-wallet/{{ tool }}"
+    remote_src: yes
+    dest: /usr/local/bin
+    mode: '0755'
+    owner: root
+    group: root
+  loop:
+  - cardano-node
+  - cardano-cli
+  - cardano-address
+  - cardano-wallet
+  - bech32
+  loop_control:
+    loop_var: tool
+- name: Install bash auto-completion
+  become: yes
+  ansible.builtin.copy:
+    src: "/tmp/cardano-wallet/auto-completion/bash/cardano-wallet.sh"
+    remote_src: yes
+    dest: /etc/bash_completion.d
+    mode: '0644'

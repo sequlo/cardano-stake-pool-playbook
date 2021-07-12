@@ -1,0 +1,9 @@
+#!/bin/bash
+#
+# Determine network magic arguments to be used with cardano-cli for the current network
+
+set -o errexit
+
+source "/usr/local/etc/sequlo/cardano-node/node.conf"
+
+echo "$NODE_CLI_MAGIC_ARGS"

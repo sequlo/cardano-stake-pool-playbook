@@ -1,0 +1,12 @@
+---
+- include_role:
+    name: file-exists-guard
+  loop:
+  - /usr/local/bin/cardano-address
+  - /usr/local/bin/cardano-cli
+- name: Install cardano-hd-wallet
+  become: yes
+  ansible.builtin.copy:
+    src: files/cardano-hd-wallet
+    dest: "/usr/local/bin"
+    mode: '0755'

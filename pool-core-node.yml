@@ -1,0 +1,15 @@
+---
+- hosts: core
+  tasks:
+  - include_role:
+      name: cardano-node
+  - include_role:
+      name: cardano-node-service
+  - include_role:
+      name: cardano-node-config-core
+  - include_role: 
+      name: cardano-node-topology-core
+  - include_role:
+      name: cardano-node-prometheus
+  - include_role:
+      name: cardano-node-monitor

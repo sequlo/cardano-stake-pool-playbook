@@ -1,0 +1,17 @@
+---
+- hosts: operator
+  tasks:
+  - include_role:
+      name: cardano-node
+  - include_role:
+      name: cardano-address
+    vars:
+      version: '3.4.0'
+  - include_role:
+      name: cardano-node-service
+  - include_role:
+      name: cardano-cli-magic-args
+  - include_role:
+      name: cardano-hd-wallet
+  - include_role:
+      name: cardano-stake-pool

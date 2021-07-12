@@ -1,0 +1,2 @@
+---
+topology_path: /usr/local/etc/sequlo/cardano-node/network/{{ node_network }}/{{ node_network }}-topology.json

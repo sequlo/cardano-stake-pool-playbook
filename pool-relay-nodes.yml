@@ -1,0 +1,17 @@
+---
+- hosts: relays
+  tasks:
+  - include_role:
+      name: cardano-node
+  - include_role:
+      name: cardano-node-service
+  - include_role:
+      name: cardano-node-config-relay
+  - include_role: 
+      name: cardano-node-topology-relay
+  - include_role:
+      name: cardano-node-topology-updater
+  - include_role:
+      name: cardano-node-prometheus
+  - include_role:
+      name: cardano-node-monitor

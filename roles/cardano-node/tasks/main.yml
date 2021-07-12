@@ -1,0 +1,12 @@
+---
+- name: Install cardano-node including cardano-cli
+  become: yes
+  ansible.builtin.unarchive:
+    src: 'https://hydra.iohk.io/job/Cardano/cardano-node/cardano-node-linux/latest/download/1'
+    dest: /usr/local/bin
+    remote_src: yes
+    owner: root
+    group: root
+    extra_opts:
+    - './cardano-node'
+    - './cardano-cli'

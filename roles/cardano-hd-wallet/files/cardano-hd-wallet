@@ -1,0 +1,639 @@
+#!/bin/bash
+#
+# Command-line for Cardano HD wallet
+
+set -o pipefail
+set -o errexit
+
+source "/usr/local/etc/sequlo/cardano-node/node.conf"
+
+WALLET_PHRASE_PATH="wallet.phrase"
+
+# ------------------------------------------------------------------------------------------------
+# Business layer
+# ------------------------------------------------------------------------------------------------
+
+function wallet_init() {
+  local is_forced="$1"; shift
+  if [[ "$is_forced" == true || ! -f "$WALLET_PHRASE_PATH" ]]; then
+    cardano-address recovery-phrase generate > "$WALLET_PHRASE_PATH"
+  fi
+}
+
+function wallet_get_root_xsk() {
+  cat "$WALLET_PHRASE_PATH" | cardano-address key from-recovery-phrase Shelley
+}
+
+function wallet_get_child_xsk() {
+  local type="$1"; shift
+  local ix="$1"; shift
+  local root_xsk="$(wallet_get_root_xsk)"
+  echo "$root_xsk" | cardano-address key child "1852H/1815H/0H/$type/$ix"
+}
+
+function wallet_get_stake_xsks() {
+  local stake_xsk_path="$(mktemp)"
+  wallet_get_child_xsk 2 0 > "$stake_xsk_path"
+  local stake_xsks_path="$(mktemp)"
+  cardano-cli key convert-cardano-address-key --shelley-stake-key --signing-key-file "$stake_xsk_path" --out-file "$stake_xsks_path"
+  cat "$stake_xsks_path"
+  rm "$stake_xsk_path" "$stake_xsks_path"
+}
+
+function wallet_get_stake_xvks() {
+  local stake_xsks_path="$(mktemp)"
+  wallet_get_stake_xsks > "$stake_xsks_path"
+  local stake_xvks_path="$(mktemp)"
+  cardano-cli key verification-key --signing-key-file "$stake_xsks_path" --verification-key-file "$stake_xvks_path"
+  cat "$stake_xvks_path"
+  rm "$stake_xsks_path" "$stake_xvks_path"
+}
+
+function wallet_get_stake_vks() {
+  local stake_xvks_path="$(mktemp)"
+  wallet_get_stake_xvks > "$stake_xvks_path"
+  local stake_vks_path="$(mktemp)"
+  cardano-cli key non-extended-key --extended-verification-key-file "$stake_xvks_path" --verification-key-file "$stake_vks_path"
+  cat "$stake_vks_path"
+  rm "$stake_xvks_path" "$stake_vks_path"
+}
+
+function wallet_get_stake_addr() {
+  local stake_vks_path="$(mktemp)"
+  wallet_get_stake_vks > "$stake_vks_path"
+  local stake_addr_path="$(mktemp)"
+  cardano-cli stake-address build --stake-verification-key-file "$stake_vks_path" --out-file "$stake_addr_path" $NODE_CLI_MAGIC_ARGS
+  cat "$stake_addr_path"
+  rm "$stake_vks_path" "$stake_addr_path"
+}
+
+function wallet_get_payment_xsks() {
+  local type="$1"; shift;
+  local ix="$1"; shift
+  local payment_xsk_path="$(mktemp)"
+  wallet_get_child_xsk "$type" "$ix" > "$payment_xsk_path"
+  local payment_xsks_path="$(mktemp)"
+  cardano-cli key convert-cardano-address-key --shelley-payment-key --signing-key-file "$payment_xsk_path" --out-file "$payment_xsks_path"
+  cat "$payment_xsks_path"
+  rm "$payment_xsk_path" "$payment_xsks_path"
+}
+
+function wallet_get_payment_xvks() {
+  local type="$1"; shift;
+  local ix="$1"; shift
+  local payment_xsks_path="$(mktemp)"
+  wallet_get_payment_xsks "$type" "$ix" > "$payment_xsks_path"
+  local payment_xvks_path="$(mktemp)"
+  cardano-cli key verification-key --signing-key-file "$payment_xsks_path" --verification-key-file "$payment_xvks_path"
+  cat "$payment_xvks_path"
+  rm "$payment_xsks_path" "$payment_xvks_path"
+}
+
+function wallet_get_payment_vks() {
+  local type="$1"; shift;
+  local ix="$1"; shift
+  local payment_xvks_path="$(mktemp)"
+  wallet_get_payment_xvks "$type" "$ix" > "$payment_xvks_path"
+  local payment_vks_path="$(mktemp)"
+  cardano-cli key non-extended-key --extended-verification-key-file "$payment_xvks_path" --verification-key-file "$payment_vks_path"
+  cat "$payment_vks_path"
+  rm "$payment_xvks_path" "$payment_vks_path"
+}
+
+function wallet_get_payment_addr() {
+  local type="$1"; shift;
+  local ix="$1"; shift
+  local payment_vks_path="$(mktemp)"
+  wallet_get_payment_vks "$type" "$ix" > "$payment_vks_path"
+  local stake_vks_path="$(mktemp)"
+  wallet_get_stake_vks > "$stake_vks_path"
+  local payment_addr_path="$(mktemp)"
+  cardano-cli address build --payment-verification-key-file "$payment_vks_path" --stake-verification-key-file "$stake_vks_path" --out-file "$payment_addr_path" $NODE_CLI_MAGIC_ARGS
+  cat "$payment_addr_path"
+  rm "$payment_vks_path" "$stake_vks_path" "$payment_addr_path"
+}
+
+function wallet_query_utxo() {
+  local type="$1"; shift;
+  local ix="$1"; shift
+  local addr="$(wallet_get_payment_addr "$type" "$ix")"
+  cardano-cli query utxo --address "$addr" $NODE_CLI_MAGIC_ARGS
+}
+
+function wallet_query_stake_address_info() {
+  local addr="$(wallet_get_stake_addr)"
+  cardano-cli query stake-address-info --address "$addr" $NODE_CLI_MAGIC_ARGS
+}
+
+function wallet_register_stake_address() {
+  local is_dry_run="$1"; shift
+  local workdir="$(mktemp -d)"
+  wallet_get_stake_vks > "$workdir/stake.vkey"
+  cardano-cli stake-address registration-certificate --stake-verification-key-file "$workdir/stake.vkey" --out-file "$workdir/stake-addr-reg.cert"
+  local tx_out_addr="$(wallet_get_payment_addr 0 0)"
+  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
+  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
+  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-reg.cert" --out-file "$workdir/tx.draft"
+  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local stake_addr_deposit="$(cat "$workdir/protocol.json" | grep stakeAddressDeposit | tr -d ', ' | cut -f 2 -d:)"
+  local change="$(( spend - fee - stake_addr_deposit ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-reg.cert" --out-file "$workdir/tx.raw"
+  wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
+  wallet_get_stake_xsks > "$workdir/stake.skey"
+  cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
+function wallet_deregister_stake_address() {
+  local is_dry_run="$1"; shift
+  local workdir="$(mktemp -d)"
+  wallet_get_stake_vks > "$workdir/stake.vkey"
+  cardano-cli stake-address deregistration-certificate --stake-verification-key-file "$workdir/stake.vkey" --out-file "$workdir/stake-addr-dereg.cert"
+  local tx_out_addr="$(wallet_get_payment_addr 0 0)"
+  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
+  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
+  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-dereg.cert" --out-file "$workdir/tx.draft"
+  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local stake_addr_deposit="$(cat "$workdir/protocol.json" | grep stakeAddressDeposit | tr -d ', ' | cut -f 2 -d:)"
+  local change="$(( spend - fee + stake_addr_deposit ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-dereg.cert" --out-file "$workdir/tx.raw"
+  wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
+  wallet_get_stake_xsks > "$workdir/stake.skey"
+  cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
+function wallet_delegate_stake_address() {
+  local is_dry_run="$1"; shift
+  local cold_vkey_path="$1"; shift
+  local workdir="$(mktemp -d)"
+  wallet_get_stake_vks > "$workdir/stake.vkey"
+  cardano-cli stake-address delegation-certificate --stake-verification-key-file "$workdir/stake.vkey" --cold-verification-key-file "$cold_vkey_path" --out-file "stake-addr-deleg.cert"
+  local tx_out_addr="$(wallet_get_payment_addr 0 0)"
+  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
+  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
+  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-deleg.cert" --out-file "$workdir/tx.draft"
+  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local change="$(( spend - fee ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-deleg.cert" --out-file "$workdir/tx.raw"
+  wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
+  wallet_get_stake_xsks > "$workdir/stake.skey"
+  cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
+function wallet_withdraw_staking_rewards() {
+  local is_dry_run="$1"; shift
+  local workdir="$(mktemp -d)"
+  local tx_out_addr="$(wallet_get_payment_addr 0 0)"
+  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
+  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
+  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  local withdrawal="$(wallet_get_stake_addr)"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --withdrawal "$withdrawal+0" --invalid-hereafter 0 --fee 0 --out-file "$workdir/tx.draft"
+  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local rewards="$(wallet_query_stake_address_info | grep rewardAccountBalance | tr -d ', ' | cut -f 2 -d ':')"
+  local change="$(( spend - fee + rewards ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --withdrawal "$withdrawal+$rewards" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --out-file "$workdir/tx.raw"
+  wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
+  wallet_get_stake_xsks > "$workdir/stake.skey"
+  cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
+# ------------------------------------------------------------------------------------------------
+# Service layer
+# ------------------------------------------------------------------------------------------------
+
+function print_usage_main_stake_withdraw() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake withdraw [--dry-run]
+  Withdraw staking rewards
+
+Available options:
+  --dry-run                 Generate signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_stake_withdraw() {
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_stake_withdraw;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  wallet_withdraw_staking_rewards "$is_dry_run"
+}
+
+function print_usage_main_stake_delegate() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake delegate COLD_VKEY_PATH [--dry-run]
+  Delegate stake address
+
+Available options:
+  --dry-run                 Generate stake address delegation certificate and signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_stake_delegate() {
+  local cold_vkey_path="$1"; shift || true
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_stake_delegate;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  wallet_delegate_stake_address "$cold_vkey_path" "$is_dry_run"
+}
+
+function print_usage_main_stake_deregister() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake deregister [--dry-run]
+  Deregister stake address
+
+Available options:
+  --dry-run                 Generate stake address deregistration certificate and signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_stake_deregister() {
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_stake_deregister;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  wallet_deregister_stake_address "$is_dry_run"
+}
+
+function print_usage_main_stake_register() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake register [--dry-run]
+  Register stake address
+
+Available options:
+  --dry-run                 Generate stake address registration certificate and signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_stake_register() {
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_stake_register;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  wallet_register_stake_address "$is_dry_run"
+}
+
+function print_usage_main_stake_query() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake query COMMAND
+  Query local node for stake account object
+
+Available commands:
+  info                      Query stake account info
+EOF
+    exit 1
+}
+
+function main_stake_query() {
+  local command="$1"; shift || true
+  case "$command" in
+    info) wallet_query_stake_address_info "$@";;
+    *) print_usage_main_stake_query;;
+  esac
+}
+
+function print_usage_main_stake_get_key() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake get key OPTION
+  Get stake account key
+
+Available options:
+  -s, --skey                Get signing key
+  -v, --vkey                Get verification key
+EOF
+    exit 1
+}
+
+function main_stake_get_key() {
+  local option="$1"; shift || true
+  case "$option" in
+    -s|--skey) wallet_get_stake_xsks "$@";;
+    -v|--vkey) wallet_get_stake_vks "$@";;
+    *) print_usage_main_stake_get_key;;
+  esac
+}
+
+function print_usage_main_stake_get() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake get COMMAND
+  Get stake account object
+
+Available commands:
+  key                       Get stake account key
+  address                   Get stake account address
+EOF
+    exit 1
+}
+
+function main_stake_get() {
+  local command="$1"; shift || true
+  case "$command" in
+    key) main_stake_get_key "$@";;
+    address) wallet_get_stake_addr "$@";;
+    *) print_usage_main_stake_get;;
+  esac
+}
+
+function print_usage_main_stake() {
+    cat <<EOF
+Usage: cardano-hd-wallet stake COMMAND
+  About stake account
+
+Available commands:
+  get                       Get stake account object
+  query                     Query local node for stake account object
+  register                  Register stake address
+  deregister                Deregister stake address
+  delegate                  Delegate stake address
+  withdraw                  Withdraw staking rewards
+EOF
+    exit 1
+}
+
+function main_stake() {
+  local command="$1"; shift || true
+  case "$command" in
+    get) main_stake_get "$@";;
+    query) main_stake_query "$@";;
+    register) main_stake_register "$@";;
+    deregister) main_stake_deregister "$@";;
+    delegate) main_stake_delegate "$@";;
+    withdraw) main_stake_withdraw "$@";;
+    *) print_usage_main_stake;;
+  esac
+}
+
+function print_usage_main_change_query() {
+    cat <<EOF
+Usage: cardano-hd-wallet change INDEX query
+  Query local node for change account object
+
+Available commands:
+  utxo                      Query change account UTxO
+EOF
+    exit 1
+}
+
+function main_change_query() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    utxo) wallet_query_utxo 1 "$ix" "$@";;
+    *) print_usage_main_change_query;;
+  esac
+}
+
+function print_usage_main_change_get_key() {
+    cat <<EOF
+Usage: cardano-hd-wallet change INDEX get key OPTION
+  Get change account key
+
+Available options:
+  -s, --skey                Get signing key
+  -v, --vkey                Get verification key
+EOF
+    exit 1
+}
+
+function main_change_get_key() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    -s|--skey) wallet_get_payment_xsks 1 "$ix" "$@";;
+    -v|--vkey) wallet_get_payment_vks 1 "$ix" "$@";;
+    *) print_usage_main_change_get_key;;
+  esac
+}
+
+function print_usage_main_change_get() {
+    cat <<EOF
+Usage: cardano-hd-wallet change INDEX get
+  About change account
+
+Available commands:
+  key                       Get change account key
+  address                   Get change account address
+EOF
+    exit 1
+}
+
+function main_change_get() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    key) main_change_get_key "$ix" "$@";;
+    address) wallet_get_payment_addr 1 "$ix" "$@";;
+    *) print_usage_main_change_get;;
+  esac
+}
+
+function print_usage_main_change() {
+    cat <<EOF
+Usage: cardano-hd-wallet change INDEX COMMAND
+  About change account
+
+Available commands:
+  get                       Get change account object
+  query                     Query local node for change account object
+EOF
+    exit 1
+}
+
+function main_change() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    get) main_change_get "$ix" "$@";;
+    query) main_change_query "$ix" "$@";;
+    *) print_usage_main_change;;
+  esac
+}
+
+function print_usage_main_payment_query() {
+    cat <<EOF
+Usage: cardano-hd-wallet payment INDEX query
+  Query local node for payment account object
+
+Available commands:
+  utxo                      Query payment account UTxO
+EOF
+    exit 1
+}
+
+function main_payment_query() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    utxo) wallet_query_utxo 0 "$ix" "$@";;
+    *) print_usage_main_payment_query;;
+  esac
+}
+
+function print_usage_main_payment_get_key() {
+    cat <<EOF
+Usage: cardano-hd-wallet payment INDEX get key OPTION
+  Get payment account key
+
+Available options:
+  -s, --skey                Get signing key
+  -v, --vkey                Get verification key
+EOF
+    exit 1
+}
+
+function main_payment_get_key() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    -s|--skey) wallet_get_payment_xsks 0 "$ix" "$@";;
+    -v|--vkey) wallet_get_payment_vks 0 "$ix" "$@";;
+    *) print_usage_main_payment_get_key;;
+  esac
+}
+
+function print_usage_main_payment_get() {
+    cat <<EOF
+Usage: cardano-hd-wallet payment INDEX get
+  About payment account
+
+Available commands:
+  key                       Get payment account key
+  address                   Get payment account address
+EOF
+    exit 1
+}
+
+function main_payment_get() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    key) main_payment_get_key "$ix" "$@";;
+    address) wallet_get_payment_addr 0 "$ix" "$@";;
+    *) print_usage_main_payment_get;;
+  esac
+}
+
+function print_usage_main_payment() {
+    cat <<EOF
+Usage: cardano-hd-wallet payment INDEX COMMAND
+  About payment account
+
+Available commands:
+  get                       Get payment account object
+  query                     Query local node for payment account object
+EOF
+    exit 1
+}
+
+function main_payment() {
+  local ix="$1"; shift || true
+  local command="$1"; shift || true
+  case "$command" in
+    get) main_payment_get "$ix" "$@";;
+    query) main_payment_query "$ix" "$@";;
+    *) print_usage_main_payment;;
+  esac
+}
+
+function print_usage_main() {
+    cat <<EOF
+Usage: cardano-hd-wallet [-X|--debug] COMMAND
+  Command-line for Cardano HD wallet
+
+Available options:
+  -X, --debug               Produce execution debug output
+
+Available commands:
+  init                      Generate wallet phrase file
+  payment                   About payment account
+  change                    About change account
+  stake                     About stake account
+EOF
+    exit 1
+}
+
+function main() {
+  local is_debug=false
+  while getopts ":X-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      debug|X) is_debug=true;;
+      *) print_usage_main;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [ "$is_debug" == true ] && set -o xtrace
+  local command="$1"; shift || true
+  case "$command" in
+    init) wallet_init false "$@";;
+    payment) main_payment "$@";;
+    change) main_change "$@";;
+    stake) main_stake "$@";;
+    *) print_usage_main;;
+  esac
+  exit 0
+}
+
+main "$@"

@@ -1,0 +1,327 @@
+#!/bin/bash
+#
+# Derive keys/addresses for a Cardano HD Shelley wallet
+
+set -o errexit
+
+function key_child() {
+  [ -z "$phrase" ] && phrase="$(cat)"
+  local type="$1"
+  local index="$2"
+  echo $phrase | cardano-address key from-recovery-phrase Shelley | cardano-address key child 1852H/1815H/0H/$type/$index
+}
+
+function print_usage_main_key_child_payment() {
+    cat <<EOF
+Usage: cardano-hd-address key child payment INDEX
+  Derive payment child key from a parent public/private key
+
+Available options:
+  INDEX           Index of the payment child key
+EOF
+    exit 1  
+}
+
+function main_key_child_payment() {
+  [ "$#" != 1 ] && print_usage_main_key_child_payment
+  key_child 0 "$@"
+}
+
+function main_key_child_change() {
+  key_child 1 0
+}
+
+function main_key_child_stake() {
+  key_child 2 0
+}
+
+function print_usage_main_key_child() {
+    cat <<EOF
+Usage: cardano-hd-address key child COMMAND
+  Derive child keys from a parent public/private key
+
+Available commands:
+  payment         Derive a payment child key
+  change          Derive a change child key
+  stake           Derive a stake child key
+EOF
+    exit 1
+}
+
+function main_key_child() {
+  local subcommand="$1"; shift || true
+  case "$subcommand" in
+    payment) main_key_child_payment "$@";;
+    change) main_key_child_change "$@";;
+    stake) main_key_child_stake "$@";;
+    *) print_usage_main_key_child;;
+  esac
+}
+
+function key_public() {
+  local type="$1"; shift
+  local index="$1"; shift
+  key_child "$type" "$index" | cardano-address key public "$@"
+}
+
+function print_usage_main_key_public_payment() {
+    cat <<EOF
+Usage: cardano-hd-address key public payment INDEX (--with-chain-code|--without-chain-code)
+  Get the public counterpart of a payment private key
+
+Available options:
+  INDEX           Index of the payment child key
+EOF
+    exit 1  
+}
+
+function main_key_public_payment() {
+  [ "$#" != 2 ] && print_usage_main_key_public_payment
+  key_public 0 "$@"
+}
+
+function print_usage_main_key_public_change() {
+    cat <<EOF
+Usage: cardano-hd-address key public change (--with-chain-code|--without-chain-code)
+  Get the public counterpart of a change private key
+EOF
+    exit 1  
+}
+
+function main_key_public_change() {
+  [ "$#" != 1 ] && print_usage_main_key_public_change
+  key_public 1 0 "$@"
+}
+
+function print_usage_main_key_public_stake() {
+    cat <<EOF
+Usage: cardano-hd-address key public stake (--with-chain-code|--without-chain-code)
+  Get the public counterpart of a stake private key
+EOF
+    exit 1  
+}
+
+function main_key_public_stake() {
+  [ "$#" != 1 ] && print_usage_main_key_public_stake
+  key_public 2 0 "$@"
+}
+
+function print_usage_main_key_public() {
+    cat <<EOF
+Usage: cardano-hd-address key child COMMAND
+  Get the public counterpart of a private key
+
+Available commands:
+  payment         Get the public counterpart of a payment private key
+  change          Get the public counterpart of a change private key
+  stake           Get the public counterpart of a stake private key
+EOF
+    exit 1
+}
+
+function main_key_public() {
+  local subcommand="$1"; shift || true
+  case "$subcommand" in
+    payment) main_key_public_payment "$@";;
+    change) main_key_public_change "$@";;
+    stake) main_key_public_stake "$@";;
+    *) print_usage_main_key_public;;
+  esac
+}
+
+function print_usage_main_key() {
+    cat <<EOF
+Usage: cardano-hd-address key COMMAND
+  About public/private keys
+
+Available commands:
+  child           Derive child key from a parent public/private key
+  public          Get the public counterpart of a private key
+EOF
+    exit 1
+}
+
+function main_key() {
+  local subcommand="$1"; shift || true
+  case "$subcommand" in
+    child) main_key_child "$@";;
+    public) main_key_public "$@";;
+    *) print_usage_main_key;;
+  esac
+}
+
+function print_usage_main_address_payment() {
+    cat <<EOF
+Usage: cardano-hd-address address payment INDEX NETWORK-TAG
+  Create a payment address
+
+Available options:
+  INDEX           Index of the payment child key
+  NETWORK-TAG     Either mainnet, testnet or an integer
+EOF
+    exit 1  
+}
+
+function main_address_payment() {
+  [ "$#" != 2 ] && print_usage_main_address_payment
+  local index="$1"; shift
+  local network_tag="$1"; shift
+  main_key_public_payment "$index" --with-chain-code | cardano-address address payment --network-tag "$network_tag"
+}
+
+function print_usage_main_address_change() {
+    cat <<EOF
+Usage: cardano-hd-address address change NETWORK-TAG
+  Create a change address
+
+Available options:
+  NETWORK-TAG     Either mainnet, testnet or an integer
+EOF
+    exit 1  
+}
+
+function main_address_change() {
+  [ "$#" != 1 ] && print_usage_main_address_change
+  local network_tag="$1"; shift
+  main_key_public_change --with-chain-code | cardano-address address payment --network-tag "$network_tag"
+}
+
+function print_usage_main_address_stake() {
+    cat <<EOF
+Usage: cardano-hd-address address stake NETWORK-TAG
+  Create a stake address
+
+Available options:
+  NETWORK-TAG     Either mainnet, testnet or an integer
+EOF
+    exit 1  
+}
+
+function main_address_stake() {
+  [ "$#" != 1 ] && print_usage_main_address_stake
+  local network_tag="$1"; shift
+  main_key_public_stake --with-chain-code | cardano-address address stake --network-tag "$network_tag"
+}
+
+function print_usage_main_address_delegation_payment() {
+    cat <<EOF
+Usage: cardano-hd-address address delegation payment INDEX NETWORK-TAG
+  Create a payment delegation address
+
+Available options:
+  INDEX           Index of the payment child key
+  NETWORK-TAG     Either mainnet, testnet or an integer
+EOF
+    exit 1  
+}
+
+function main_address_delegation_payment() {
+  [ "$#" != 2 ] && print_usage_main_address_delegation_payment
+  local index="$1"; shift
+  local network_tag="$1"; shift
+  phrase="$(cat)"
+  local key_public_stake=$(main_key_public_stake --with-chain-code)
+  main_address_payment "$index" "$network_tag" | cardano-address address delegation "$key_public_stake"
+}
+
+function print_usage_main_address_delegation_change() {
+    cat <<EOF
+Usage: cardano-hd-address address delegation change NETWORK-TAG
+  Create a change delegation address
+
+Available options:
+  NETWORK-TAG     Either mainnet, testnet or an integer
+EOF
+    exit 1  
+}
+
+function main_address_delegation_change() {
+  [ "$#" != 1 ] && print_usage_main_address_delegation_change
+  local network_tag="$1"; shift
+  phrase="$(cat)"
+  local key_public_stake=$(main_key_public_stake --with-chain-code)
+  main_address_change "$network_tag" | cardano-address address delegation "$key_public_stake"
+}
+
+function print_usage_main_address_delegation() {
+    cat <<EOF
+Usage: cardano-hd-address address delegation COMMAND
+  Create a delegation address
+
+Available commands:
+  payment         Create a payment delegation address
+  change          Create a change delegation address
+EOF
+    exit 1
+}
+
+function main_address_delegation() {
+  local subcommand="$1"; shift || true
+  case "$subcommand" in
+    payment) main_address_delegation_payment "$@";;
+    change) main_address_delegation_change "$@";;
+    *) print_usage_main_address_delegation;;
+  esac
+}
+
+function print_usage_main_address() {
+    cat <<EOF
+Usage: cardano-hd-address address COMMAND
+  About addresses
+
+Available commands:
+  payment         Create a payment address
+  change          Create a change address
+  stake           Create a stake address
+  delegation      Create a delegation address
+EOF
+    exit 1
+}
+
+function main_address() {
+  local subcommand="$1"; shift || true
+  case "$subcommand" in
+    payment) main_address_payment "$@";;
+    change) main_address_change "$@";;
+    stake) main_address_stake "$@";;
+    delegation) main_address_delegation "$@";;
+    *) print_usage_main_address;;
+  esac
+}
+
+function print_usage_main() {
+    cat <<EOF
+Usage: cardano-hd-address [-X|--debug] COMMAND
+  Command-line for Cardano HD Shelley wallet address and key manipulation
+
+Available options:
+  -X, --debug     Produce execution debug output
+
+Available commands:
+  key             About public/private keys
+  address         About addresses
+EOF
+    exit 1
+}
+
+function main() {
+  while getopts ":X-:" opt; do
+    [ "$opt" == '-' ] && opt="$OPTARG"
+    case "$opt" in
+      debug|X) debug=true;;
+      *) print_usage_main;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  [ "$debug" ] && set -o xtrace
+  [ "$#" == 0 ] && print_usage_main
+  local subcommand="$1"; shift || true
+  case "$subcommand" in
+    key) main_key "$@";;
+    address) main_address "$@";;
+    *) print_usage_main;;
+  esac
+  exit 0
+}
+
+main "$@"
