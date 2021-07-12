@@ -1,5 +1,5 @@
 # cardano-stake-pool
-Configure a Cardano stake pool with Ansible.
+Scripts for launching and maintaining a stake pool on Cardano.
 
 
 # Prerequisites
