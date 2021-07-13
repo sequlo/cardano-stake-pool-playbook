@@ -130,19 +130,25 @@ function wallet_register_stake_address() {
   local workdir="$(mktemp -d)"
   wallet_get_stake_vks > "$workdir/stake.vkey"
   cardano-cli stake-address registration-certificate --stake-verification-key-file "$workdir/stake.vkey" --out-file "$workdir/stake-addr-reg.cert"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(wallet_query_utxo 0 0 | tail -n +3 | sort -k3 -nr)"
   local tx_out_addr="$(wallet_get_payment_addr 0 0)"
-  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
-  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
-  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-reg.cert" --out-file "$workdir/tx.draft"
-  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-reg.cert" --out-file "$workdir/tx.draft"
   cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
-  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
-  local stake_addr_deposit="$(cat "$workdir/protocol.json" | grep stakeAddressDeposit | tr -d ', ' | cut -f 2 -d:)"
-  local change="$(( spend - fee - stake_addr_deposit ))"
-  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count "$tx_in_count" --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local stake_addr_deposit="$(cat "$workdir/protocol.json" | jq -r '.stakeAddressDeposit')"
+  local change="$(( spendable - fee - stake_addr_deposit ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
   local invalid_hereafter="$(( current_slot + 200 ))"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-reg.cert" --out-file "$workdir/tx.raw"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-reg.cert" --out-file "$workdir/tx.raw"
   wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
   wallet_get_stake_xsks > "$workdir/stake.skey"
   cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
@@ -154,19 +160,25 @@ function wallet_deregister_stake_address() {
   local workdir="$(mktemp -d)"
   wallet_get_stake_vks > "$workdir/stake.vkey"
   cardano-cli stake-address deregistration-certificate --stake-verification-key-file "$workdir/stake.vkey" --out-file "$workdir/stake-addr-dereg.cert"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(wallet_query_utxo 0 0 | tail -n +3 | sort -k3 -nr)"
   local tx_out_addr="$(wallet_get_payment_addr 0 0)"
-  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
-  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
-  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-dereg.cert" --out-file "$workdir/tx.draft"
-  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-dereg.cert" --out-file "$workdir/tx.draft"
   cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
-  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
-  local stake_addr_deposit="$(cat "$workdir/protocol.json" | grep stakeAddressDeposit | tr -d ', ' | cut -f 2 -d:)"
-  local change="$(( spend - fee + stake_addr_deposit ))"
-  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count "$tx_in_count" --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local stake_addr_deposit="$(cat "$workdir/protocol.json" | jq -r '.stakeAddressDeposit')"
+  local change="$(( spendable - fee + stake_addr_deposit ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
   local invalid_hereafter="$(( current_slot + 200 ))"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-dereg.cert" --out-file "$workdir/tx.raw"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-dereg.cert" --out-file "$workdir/tx.raw"
   wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
   wallet_get_stake_xsks > "$workdir/stake.skey"
   cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
@@ -178,19 +190,25 @@ function wallet_delegate_stake_address() {
   local cold_vkey_path="$1"; shift
   local workdir="$(mktemp -d)"
   wallet_get_stake_vks > "$workdir/stake.vkey"
-  cardano-cli stake-address delegation-certificate --stake-verification-key-file "$workdir/stake.vkey" --cold-verification-key-file "$cold_vkey_path" --out-file "stake-addr-deleg.cert"
+  cardano-cli stake-address delegation-certificate --stake-verification-key-file "$workdir/stake.vkey" --cold-verification-key-file "$cold_vkey_path" --out-file "$workdir/stake-addr-deleg.cert"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(wallet_query_utxo 0 0 | tail -n +3 | sort -k3 -nr)"
   local tx_out_addr="$(wallet_get_payment_addr 0 0)"
-  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
-  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
-  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-deleg.cert" --out-file "$workdir/tx.draft"
-  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-addr-deleg.cert" --out-file "$workdir/tx.draft"
   cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
-  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
-  local change="$(( spend - fee ))"
-  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count $tx_in_count --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local change="$(( spendable - fee ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
   local invalid_hereafter="$(( current_slot + 200 ))"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-deleg.cert" --out-file "$workdir/tx.raw"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-addr-deleg.cert" --out-file "$workdir/tx.raw"
   wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
   wallet_get_stake_xsks > "$workdir/stake.skey"
   cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
@@ -200,20 +218,26 @@ function wallet_delegate_stake_address() {
 function wallet_withdraw_staking_rewards() {
   local is_dry_run="$1"; shift
   local workdir="$(mktemp -d)"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(wallet_query_utxo 0 0 | tail -n +3 | sort -k3 -nr)"
   local tx_out_addr="$(wallet_get_payment_addr 0 0)"
-  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
-  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
-  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
   local withdrawal="$(wallet_get_stake_addr)"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --withdrawal "$withdrawal+0" --invalid-hereafter 0 --fee 0 --out-file "$workdir/tx.draft"
-  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --withdrawal "$withdrawal+0" --invalid-hereafter 0 --fee 0 --out-file "$workdir/tx.draft"
   cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
-  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
-  local rewards="$(wallet_query_stake_address_info | grep rewardAccountBalance | tr -d ', ' | cut -f 2 -d ':')"
-  local change="$(( spend - fee + rewards ))"
-  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count $tx_in_count --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local rewards="$(wallet_query_stake_address_info | jq -r '.[0].rewardAccountBalance')"
+  local change="$(( spendable - fee + rewards ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
   local invalid_hereafter="$(( current_slot + 200 ))"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --withdrawal "$withdrawal+$rewards" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --out-file "$workdir/tx.raw"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --withdrawal "$withdrawal+$rewards" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --out-file "$workdir/tx.raw"
   wallet_get_payment_xsks 0 0 > "$workdir/payment.skey"
   wallet_get_stake_xsks > "$workdir/stake.skey"
   cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$workdir/payment.skey" --signing-key-file "$workdir/stake.skey" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
@@ -253,7 +277,7 @@ function main_stake_withdraw() {
 
 function print_usage_main_stake_delegate() {
     cat <<EOF
-Usage: cardano-hd-wallet stake delegate COLD_VKEY_PATH [--dry-run]
+Usage: cardano-hd-wallet stake delegate [--dry-run] COLD_VKEY_PATH
   Delegate stake address
 
 Available options:
@@ -263,20 +287,13 @@ EOF
 }
 
 function main_stake_delegate() {
-  local cold_vkey_path="$1"; shift || true
   local is_dry_run=false
-  OPTIND=0
-  while getopts ":-:" opt; do
-    if [ "$opt" == '-' ]; then
-      opt="$OPTARG"; unset OPTARG
-    fi
-    case "$opt" in
-      dry-run) is_dry_run=true;;
-      *) print_usage_main_stake_delegate;;
-    esac
-  done
-  shift $((OPTIND - 1))
-  wallet_delegate_stake_address "$cold_vkey_path" "$is_dry_run"
+  case "$1" in
+    --dry-run) is_dry_run=true; shift;;
+    -h) print_usage_main_stake_delegate;;
+  esac
+  local cold_vkey_path="$1"; shift || print_usage_main_stake_delegate
+  wallet_delegate_stake_address "$is_dry_run" "$cold_vkey_path"
 }
 
 function print_usage_main_stake_deregister() {
