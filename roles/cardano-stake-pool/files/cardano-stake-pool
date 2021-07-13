@@ -67,8 +67,8 @@ function pool_init_op_cert() {
   local is_forced="$1"; shift
   if [[ "$is_forced" == true || ! -f "$POOL_CERT_NODE_OPERATIONAL_PATH" ]]; then
     mkdir -p "$POOL_DIR"
-    local slots_per_kes_period="$(cat "$NODE_SHELLEY_GENESIS_PATH" | grep KESPeriod | tr -d ', ' | cut -f 2 -d ':')"
-    local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+    local slots_per_kes_period="$(cat "$NODE_SHELLEY_GENESIS_PATH" | jq -r '.slotsPerKESPeriod')"
+    local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
     local current_kes_period="$(( current_slot / slots_per_kes_period ))"
     cardano-cli node issue-op-cert \
       --kes-verification-key-file "$POOL_KEY_KES_VKEY_PATH" \
@@ -233,25 +233,31 @@ function pool_register() {
   source "$POOL_CONF_PATH"
   pool_generate_stake_pool_registration_certificate "$workdir/stake-pool-reg.cert"
   local tx_out_addr="$(cat "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_ADDR_PATH")"
-  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
-  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
-  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | sort -k3 -nr)"
   local owners=$(ls -1 . | grep "$POOL_OWNER_DIR_PREFIX")
   for owner in "${owners[@]}"; do cardano-cli stake-address delegation-certificate --stake-verification-key-file "$owner/$POOL_USER_KEY_STAKE_VKEY_PATH" --cold-verification-key-file "$POOL_KEY_COLD_VKEY_PATH" --out-file "$workdir/$owner-stake-addr-deleg.cert"; done
-  local draft_tx_cmd="cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.draft""
+  local draft_tx_cmd="cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.draft""
   for owner in "${owners[@]}"; do draft_tx_cmd+=" --certificate-file $workdir/$owner-stake-addr-deleg.cert"; done
   eval "$draft_tx_cmd"
-  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
   cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
   local witnesses=("$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_SKEY_PATH" "$POOL_KEY_COLD_SKEY_PATH")
   for owner in "${owners[@]}"; do witnesses+=("$owner/$POOL_USER_KEY_STAKE_SKEY_PATH"); done
   cmp -s "$POOL_SPO_DIR/$POOL_USER_KEY_STAKE_SKEY_PATH" "${POOL_OWNER_DIR_PREFIX}1/$POOL_USER_KEY_STAKE_SKEY_PATH" || witnesses+=("$POOL_SPO_DIR/$POOL_USER_KEY_STAKE_SKEY_PATH")
-  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count "${#witnesses[@]}" --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
-  local stake_pool_deposit="$(cat "$workdir/protocol.json" | grep stakePoolDeposit | tr -d ', ' | cut -f 2 -d:)"
-  local change="$(( spend - fee - stake_pool_deposit ))"
-  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count $tx_in_count --tx-out-count 1 --witness-count "${#witnesses[@]}" --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local stake_pool_deposit="$(cat "$workdir/protocol.json" | jq -r '.stakePoolDeposit')"
+  local change="$(( spendable - fee - stake_pool_deposit ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
   local invalid_hereafter="$(( current_slot + 200 ))"
-  local raw_tx_cmd="cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee"  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.raw""
+  local raw_tx_cmd="cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee"  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.raw""
   for owner in "${owners[@]}"; do raw_tx_cmd+=" --certificate-file $workdir/$owner-stake-addr-deleg.cert"; done
   eval "$raw_tx_cmd"
   local sign_tx_cmd="cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed""
@@ -261,22 +267,28 @@ function pool_register() {
 }
 
 function pool_retire() {
-  local epoch="$1"; shift
   local is_dry_run="$1"; shift
+  local epoch="$1"; shift
   local workdir="$(mktemp -d)"
   cardano-cli stake-pool deregistration-certificate --cold-verification-key-file "$POOL_KEY_COLD_VKEY_PATH" --epoch "$epoch" --out-file "$workdir/stake-pool-dereg.cert"
   local tx_out_addr="$(cat "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_ADDR_PATH")"
-  local tx_in_utxo="$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | head -n 1 | tr -s ' ')"
-  local tx_in_hash="$(echo $tx_in_utxo | cut -f 1 -d ' ')"
-  local tx_in_ix="$(echo $tx_in_utxo | cut -f 2 -d ' ')"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-pool-dereg.cert" --out-file "$workdir/tx.draft"
-  local spend="$(echo $tx_in_utxo | cut -f 3 -d ' ')"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | sort -k3 -nr)"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0 --certificate-file "$workdir/stake-pool-dereg.cert" --out-file "$workdir/tx.draft"
   cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
-  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count 1 --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
-  local change="$(( spend - fee ))"
-  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | grep slot | tr -d ', ' | cut -f 2 -d ':')"
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count $tx_in_count --tx-out-count 1 --witness-count 2 --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local change="$(( spendable - fee ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
   local invalid_hereafter="$(( current_slot + 200 ))"
-  cardano-cli transaction build-raw --tx-in "$tx_in_hash#$tx_in_ix" --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-pool-dereg.cert" --out-file "$workdir/tx.raw"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee" --certificate-file "$workdir/stake-pool-dereg.cert" --out-file "$workdir/tx.raw"
   cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" --signing-key-file "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_SKEY_PATH" --signing-key-file "$POOL_KEY_COLD_SKEY_PATH" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed"
   [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
 }
@@ -320,20 +332,13 @@ EOF
 }
 
 function main_retire() {
-  local is_dry_run=false
-  OPTIND=0
-  while getopts ":-:" opt; do
-    if [ "$opt" == '-' ]; then
-      opt="$OPTARG"; unset OPTARG
-    fi
-    case "$opt" in
-      dry-run) is_dry_run=true;;
-      *) print_usage_main_retire;;
-    esac
-  done
-  shift $((OPTIND - 1))
-  local epoch="$1"; shift || true
-  pool_retire "$epoch" "$is_dry_run"
+local is_dry_run=false
+  case "$1" in
+    --dry-run) is_dry_run=true; shift;;
+    -h) print_usage_main_retire;;
+  esac
+  local epoch="$1"; shift || print_usage_main_retire
+  pool_retire "$is_dry_run" "$epoch"
 }
 
 function print_usage_main_register() {
