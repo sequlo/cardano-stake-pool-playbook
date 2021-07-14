@@ -15,6 +15,7 @@ Prepare an Ansible inventory file, e.g. `hosts.yaml`, definining stake pool host
 all:
   vars:
     node_network: testnet
+    timezone: Europe/Amsterdam
   hosts:
     operator:
       ansible_host: localhost
