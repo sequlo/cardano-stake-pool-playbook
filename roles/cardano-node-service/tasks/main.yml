@@ -14,6 +14,7 @@
   ansible.builtin.template:
     src: templates/node.conf
     dest: "/usr/local/etc/sequlo/cardano-node/"
+    force: no
 - name: Download network configuration
   include_tasks: download-network-config.yml
   loop:

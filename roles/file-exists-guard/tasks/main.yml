@@ -1,4 +1,4 @@
-- name: Check if file stat
+- name: Get file stat
   ansible.builtin.stat:
     path: "{{ item }}"
   register: file
