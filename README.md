@@ -62,6 +62,10 @@ Use `ssh-copy-id` to install the public key on managed nodes.
 With an inventory file called `hosts.yml` playbooks can be run in tandem by issueing the `pool.yml` playbook like so:
 
 ```bash
-$ ansible-playbook -v -i hosts.yml pool.yml
+$ ansible-playbook -i hosts.yml pool.yml
 ```
-To target specific actors just use their specific playbook instead, e.g. `pool-operator.yml`, `pool-relay-nodes.yml`, etc.
+To target specific actors just use their specific playbook instead, e.g. to only provision the relay nodes do:
+
+```bash
+$ ansible-playbook -i hosts.yml pool-relay-nodes.yml
+```
