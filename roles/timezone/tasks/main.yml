@@ -1,0 +1,4 @@
+---
+- name: Set timezone
+  become: yes
+  shell: timedatectl set-timezone {{ timezone }}
