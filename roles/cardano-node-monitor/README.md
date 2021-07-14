@@ -1,2 +1,2 @@
 # cardano-node-monitor role
-Installs `cardano-node-monitor`, which for now wraps [Guild Operators](https://github.com/cardano-community/guild-operators/blob/alpha/scripts/cnode-helper-scripts/gLiveView.sh) `gLiveView.sh` script, for monitoring a locally running `cardano-node`.
+Installs `cardano-node-monitor`, which for now wraps [Guild Operators' `gLiveView.sh` script](https://github.com/cardano-community/guild-operators/blob/alpha/scripts/cnode-helper-scripts/gLiveView.sh), for monitoring a locally running `cardano-node`.
