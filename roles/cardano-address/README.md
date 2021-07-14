@@ -1,0 +1,2 @@
+# cardano-address role
+Installs [cardano-address](https://github.com/input-output-hk/cardano-addresses) for working with Hierarchical Deterministic (HD) wallets where keys and andresses can be derived from a single seed phrase.
