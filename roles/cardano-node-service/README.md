@@ -7,7 +7,7 @@ Installs `cardano-node` as a `systemd` service.
 /usr/local/bin
   /cardano-node-service # bash script for managing the service
 /usr/local/lib/sequlo/cardano-node
-  /start-node # bash script sourcing the node configuration and for which to start a `cardano-node`
+  /start-node # bash script sourcing the node configuration used for starting a `cardano-node`
 /usr/local/etc/sequlo/cardano-node
   /network # network configuration (config.json, topology.json, *-genesis.json) grouped in folders by network
   /node.conf # node configuration declares which network configuration to use and other `cardano-node` parameters
@@ -18,7 +18,7 @@ Installs `cardano-node` as a `systemd` service.
 # Usage
 This role does not enable and start the service giving the SPO the opertunity to tweek configuration before starting `cardano-node`. This role also does not overwrite existing node configuration and network configuration.
 
-Once the SPO is happy with the configuration the service should be enabled and started like so:
+When the configuration is verified the service should be enabled and started like so:
 
 ```bash
 $ cardano-node-service enable
