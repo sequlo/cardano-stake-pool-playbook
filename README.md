@@ -8,7 +8,7 @@ Make sure to comply with the following prerequisites before running the Ansible 
 The machine running these Ansible scripts should have Ansible >=2.9.2 installed.
 
 ## Define inventory file
-Prepare an Ansible inventory file, e.g. `hosts.yaml`, definining stake pool hosts and certain variables, which looks like this:
+Prepare an Ansible inventory file, e.g. `hosts.yml`, definining stake pool hosts and certain variables, which looks like this:
 
 ```yaml
 ---
@@ -39,7 +39,7 @@ all:
         node_port: 6000
 ```
 
-This defines a Cardano stake pool with one relay node, which also caries the role of monitoring server, one core (block producing) node and the SPO's host, in this example `localhost`. It is also possible to define multiple relays and/or designate a seperate host for monitoring. It might be a good idea to have multiple inventory files, each one targeting a different network (e.g. `mainnet-hosts.yml`, `testnet-hosts.yaml`, etc.).
+This defines a Cardano stake pool with one relay node, which also caries the role of monitoring server, one core (block producing) node and the SPO's host, in this example `localhost`. It is also possible to define multiple relays and/or designate a seperate host for monitoring. It might be a good idea to have multiple inventory files, each one targeting a different network (e.g. `mainnet-hosts.yml`, `testnet-hosts.yml`, etc.).
 
 ## Prepare hosts
 Ansible scripts are tested on hosts with Ubuntu 20.04, but should theorically work with any Debian-based Linux distro; hence there is a dependency on the APT-packaging system.
