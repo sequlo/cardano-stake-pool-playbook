@@ -5,7 +5,7 @@ This repository contains Ansible scripts for provisioning a Cardano stake pool.
 Make sure to comply with the following prerequisites before running the Ansible scripts.
 
 ## Install Ansible
-The machine running these Ansible scripts should have Ansible >=2.9.2 installed.
+The machine running these Ansible scripts should have Ansible installed.
 
 ## Define inventory file
 Prepare an Ansible inventory file, e.g. `hosts.yml`, definining stake pool hosts and certain variables, which looks like this:
