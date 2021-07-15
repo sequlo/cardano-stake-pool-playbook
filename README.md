@@ -1,8 +1,8 @@
 # cardano-stake-pool
 This repository contains Ansible scripts for provisioning a Cardano stake pool.
 
-# Prerequisites
-Make sure to comply with the following prerequisites before running the Ansible scripts.
+# Pre-requisites
+Make sure to comply with the following prerequisites before running.
 
 ## Install Ansible
 The machine running these Ansible scripts should have Ansible installed.
