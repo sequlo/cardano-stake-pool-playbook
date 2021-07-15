@@ -69,3 +69,7 @@ To target specific actors just use their specific playbook instead, e.g. to only
 ```bash
 $ ansible-playbook -i hosts.yml pool-relay-nodes.yml
 ```
+
+The core component installed on almost every host is of course `cardano-node` and is managed by a `systemd` service installed by the `cardano-node-service` role. By default the node services are not enabled and started on provisioning. This will give the SPO the oppertunity to verify and possibly alter configuration.
+
+Check out the `README.md` files in the [role folders](./roles) for more information.
