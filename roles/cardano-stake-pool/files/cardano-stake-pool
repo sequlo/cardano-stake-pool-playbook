@@ -266,6 +266,39 @@ function pool_register() {
   [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
 }
 
+function pool_reregister() {
+  local is_dry_run="$1"; shift
+  local workdir="$(mktemp -d)"
+  source "$POOL_CONF_PATH"
+  pool_generate_stake_pool_registration_certificate "$workdir/stake-pool-reg.cert"
+  local tx_out_addr="$(cat "$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_ADDR_PATH")"
+  local tx_ins=""
+  local spendable=0
+  while read -r utxo; do 
+    local tx_in_hash=$(awk '{ print $1 }' <<< "$utxo")
+    local tx_in_ix=$(awk '{ print $2 }' <<< "$utxo")
+    local utxo_balance=$(awk '{ print $3 }' <<< "$utxo")
+    tx_ins="$tx_ins --tx-in $tx_in_hash#$tx_in_ix"
+    (( spendable+=utxo_balance ))
+  done <<< "$(cardano-cli query utxo --address $tx_out_addr $NODE_CLI_MAGIC_ARGS | tail -n +3 | sort -k3 -nr)"
+  local owners=$(ls -1 . | grep "$POOL_OWNER_DIR_PREFIX")
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+0" --invalid-hereafter 0 --fee 0  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.draft"
+  cardano-cli query protocol-parameters $NODE_CLI_MAGIC_ARGS --out-file "$workdir/protocol.json"
+  local witnesses=("$POOL_SPO_DIR/$POOL_USER_KEY_PAYMENT_SKEY_PATH" "$POOL_KEY_COLD_SKEY_PATH")
+  for owner in "${owners[@]}"; do witnesses+=("$owner/$POOL_USER_KEY_STAKE_SKEY_PATH"); done
+  cmp -s "$POOL_SPO_DIR/$POOL_USER_KEY_STAKE_SKEY_PATH" "${POOL_OWNER_DIR_PREFIX}1/$POOL_USER_KEY_STAKE_SKEY_PATH" || witnesses+=("$POOL_SPO_DIR/$POOL_USER_KEY_STAKE_SKEY_PATH")
+  local tx_in_count="$(echo $tx_ins | grep -o 'tx' | wc -l)"
+  local fee="$(cardano-cli transaction calculate-min-fee --tx-body-file "$workdir/tx.draft" --tx-in-count $tx_in_count --tx-out-count 1 --witness-count "${#witnesses[@]}" --byron-witness-count 0 $NODE_CLI_MAGIC_ARGS --protocol-params-file "$workdir/protocol.json" | cut -f1 -d ' ')"
+  local change="$(( spendable - fee ))"
+  local current_slot="$(cardano-cli get-tip $NODE_CLI_MAGIC_ARGS | jq -r '.slot')"
+  local invalid_hereafter="$(( current_slot + 200 ))"
+  cardano-cli transaction build-raw $tx_ins --tx-out "$tx_out_addr+$change" --invalid-hereafter "$invalid_hereafter" --fee "$fee"  --certificate-file "$workdir/stake-pool-reg.cert" --out-file "$workdir/tx.raw"
+  local sign_tx_cmd="cardano-cli transaction sign --tx-body-file "$workdir/tx.raw" $NODE_CLI_MAGIC_ARGS --out-file "$workdir/tx.signed""
+  for witness in "${witnesses[@]}"; do sign_tx_cmd+=" --signing-key-file "$witness""; done
+  eval "$sign_tx_cmd"
+  [ "$is_dry_run" == false ] && cardano-cli transaction submit --tx-file "$workdir/tx.signed" $NODE_CLI_MAGIC_ARGS
+}
+
 function pool_retire() {
   local is_dry_run="$1"; shift
   local epoch="$1"; shift
@@ -339,6 +372,33 @@ local is_dry_run=false
   esac
   local epoch="$1"; shift || print_usage_main_retire
   pool_retire "$is_dry_run" "$epoch"
+}
+
+function print_usage_main_reregister() {
+    cat <<EOF
+Usage: cardano-stake-pool reregister [--dry-run]
+  Reregister stake pool
+
+Available options:
+  --dry-run                 Generate stake pool registration certificate and signed tx, but do not submit
+EOF
+    exit 1
+}
+
+function main_reregister() {
+  local is_dry_run=false
+  OPTIND=0
+  while getopts ":-:" opt; do
+    if [ "$opt" == '-' ]; then
+      opt="$OPTARG"; unset OPTARG
+    fi
+    case "$opt" in
+      dry-run) is_dry_run=true;;
+      *) print_usage_main_reregister;;
+    esac
+  done
+  shift $((OPTIND - 1))
+  pool_reregister "$is_dry_run"
 }
 
 function print_usage_main_register() {
@@ -485,6 +545,7 @@ Available commands:
   get                       Get stake pool object
   query                     Query local node for stake pool object
   register                  Register stake pool
+  reregister                Reregister stake pool
   retire                    Retire stake pool
   renew                     Renew KES-keys and operational certificate
   export                    Export operational certificate and keys needed to core node
@@ -511,6 +572,7 @@ function main() {
     get) main_get "$@";;
     query) main_query "$@";;
     register) main_register "$@";;
+    reregister) main_reregister "$@";;
     retire) main_retire "$@";;
     renew) pool_renew "$@";;
     export) main_export "$@";;
