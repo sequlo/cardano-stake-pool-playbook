@@ -1,9 +1,6 @@
 # cardano-stake-pool
 This repository contains Ansible scripts for provisioning a Cardano stake pool.
 
-# Pre-requisites
-Make sure to comply with the following prerequisites before running.
-
 ## Install Ansible
 The machine running these Ansible scripts should have Ansible installed.
 
@@ -27,7 +24,7 @@ Append the following:
 
 Use `ssh-copy-id` to install the public key on managed nodes.
 
-# How to Run
+## How to Run
 With an inventory file called `hosts.yml` playbooks can be run in tandem by issueing the `pool.yml` playbook like so:
 
 ```bash
