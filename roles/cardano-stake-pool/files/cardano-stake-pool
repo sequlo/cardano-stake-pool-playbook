@@ -221,7 +221,9 @@ function pool_generate_stake_pool_registration_certificate() {
   done
   if [ ! -z "$POOL_METADATA_URL" ]; then
     gen_cert_cmd+=" --metadata-url $POOL_METADATA_URL"
-    gen_cert_cmd+=" --metadata-hash $(cardano-cli stake-pool metadata-hash --pool-metadata-file $POOL_METADATA_PATH)"
+    local pool_metadata_path="$(mktemp)"
+    pool_get_metadata > "$pool_metadata_path"
+    gen_cert_cmd+=" --metadata-hash $(cardano-cli stake-pool metadata-hash --pool-metadata-file $pool_metadata_path)"
   fi
   gen_cert_cmd+=" $NODE_CLI_MAGIC_ARGS --out-file $out_file"
   eval "$gen_cert_cmd"
