@@ -10,7 +10,7 @@ Each managed node's `ansible_user` should have passwordless `sudo` and the publi
 Edit `hosts.yml`, which by default defines a Cardano stake pool with one relay node, which also caries the role of monitoring server, one core (block producing) node and the SPO's host, in this example `localhost`. It is also possible to define multiple relays and/or designate a seperate host for monitoring. It might be a good idea to have multiple inventory files, each one targeting a different network e.g. `mainnet-hosts.yml`, `testnet-hosts.yml`, etc.
 
 ## How to Run
-With an inventory file called `hosts.yml` playbooks can be run in tandem by issueing the `pool.yml` playbook like so:
+With an inventory file called `hosts.yml` playbooks can be run like so:
 
 ```bash
 $ ansible-playbook -i hosts.yml pool.yml
