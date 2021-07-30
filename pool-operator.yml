@@ -5,8 +5,6 @@
       name: cardano-node
   - include_role:
       name: cardano-address
-    vars:
-      version: '3.4.0'
   - include_role:
       name: cardano-node-service
   - include_role:
