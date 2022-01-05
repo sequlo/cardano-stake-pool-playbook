@@ -2,10 +2,6 @@
 - hosts: monitor
   tasks:
   - include_role:
-      name: apt-upgrade
-  - include_role:
-      name: timezone
-  - include_role:
       name: prometheus
   - include_role:
       name: grafana

@@ -2,10 +2,6 @@
 - hosts: core
   tasks:
   - include_role:
-      name: apt-upgrade
-  - include_role:
-      name: timezone
-  - include_role:
       name: cardano-node
   - include_role:
       name: cardano-node-service
