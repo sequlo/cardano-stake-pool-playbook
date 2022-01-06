@@ -10,7 +10,7 @@ Each managed node's `ansible_user` should have passwordless `sudo` and the publi
 Edit `hosts.yml`, which by default defines a Cardano stake pool with one relay node, which also caries the role of monitoring server, one core (block producing) node and the SPO's host, in this example `localhost`. It is also possible to define multiple relays and/or designate a seperate host for monitoring. It might be a good idea to have multiple inventory files, each one targeting a different network e.g. `mainnet-hosts.yml`, `testnet-hosts.yml`, etc.
 
 ## How to Run
-Configure an inventory, something like:
+Configure an inventory file e.g. `my-testnet-pool-inventory.yml`, with something like:
 
 ```yaml
 ---
@@ -43,7 +43,7 @@ all:
 Now run:
 
 ```bash
-$ ansible-playbook -i inventory pool.yml
+$ ansible-playbook -i my-testnet-pool-inventory.yml pool.yml
 ```
 
 The core component installed on almost every host is of course `cardano-node` and is managed by a `systemd` service installed by the `cardano-node-service` role. By default the node services are not enabled and started on provisioning. This will give the SPO the opportunity to verify and possibly alter configuration.
