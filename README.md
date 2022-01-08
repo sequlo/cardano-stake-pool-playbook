@@ -1,5 +1,5 @@
-# cardano-stake-pool
-This repository contains Ansible scripts for provisioning a Cardano stake pool.
+# cardano-stake-pool-playbook
+Ansible playbook for provisioning a Cardano stake pool.
 
 ## Requirements
 Make sure Ansible is installed on the Ansible control node. Ansible scripts are tested on hosts with Ubuntu 20.04, but should theorically work with any Debian-based Linux distro.
@@ -43,7 +43,7 @@ all:
 Now run:
 
 ```bash
-$ ansible-playbook -i my-testnet-pool-inventory.yml pool.yml
+ansible-playbook -i my-testnet-pool-inventory.yml pool.yml
 ```
 
 The core component installed on almost every host is of course `cardano-node` and is managed by a `systemd` service installed by the `cardano-node-service` role. By default the node services are not enabled and started on provisioning. This will give the SPO the opportunity to verify and possibly alter configuration.
